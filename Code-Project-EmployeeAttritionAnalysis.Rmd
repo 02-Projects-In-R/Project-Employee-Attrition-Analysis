@@ -1,0 +1,417 @@
+### Employee Attrition Analysis
+
+
+```{r}
+library(ggplot2)
+
+library(tidyverse)
+library(dplyr)
+library(purrr)
+library(plyr)
+library(caTools)
+library(randomForest)
+library(interactions)
+library(stringr)
+library(mlbench)
+```
+
+# Reading the datasets:
+```{r}
+general <- read.csv('general_data.csv', sep = ',', header = TRUE, stringsAsFactors = TRUE)
+head(general)
+```
+```{r}
+dim(general)
+```
+
+```{r}
+esurvey <- read.csv('employee_survey_data.csv', sep = ',', header = TRUE, stringsAsFactors = TRUE)
+head(esurvey)
+```
+```{r}
+dim(esurvey)
+```
+
+```{r}
+msurvey <- read.csv('manager_survey_data.csv', sep = ',', header = TRUE, stringsAsFactors = TRUE)
+head(msurvey)
+```
+```{r}
+dim(msurvey)
+```
+
+# Joining the dataframes:
+
+```{r}
+df_list <- list(general, esurvey, msurvey)
+df <- df_list %>% reduce(left_join, by = 'EmployeeID')
+head(df)
+```
+
+```{r}
+str(df)
+```
+
+```{r}
+cat_col <- c('Education', 'JobLevel', 'StockOptionLevel', 'EnvironmentSatisfaction', 'JobSatisfaction', 'WorkLifeBalance', 'JobInvolvement', 'PerformanceRating')
+df[,cat_col] <- lapply(df[, cat_col], as.factor)
+str(df)
+```
+
+```{r}
+dim(df)
+```
+Task 1: Missing Value Analysis:
+
+This task is intended for you to explore various ways of handling missingness in data. Although there are simple techniques, but one must know the techniques used in a production environment for dealing with missing data. In this task you need to :
+
+• State types of Missing Data
+
+```{r}
+summary(df)
+```
+# Answer:
+
+Missing categorical variables:
+- EnvironmentSatisfaction: 25 observations
+- JobSatisfaction: 20 observations
+- WorkLifeBalance: 38 observations
+
+Missing numerical variables:
+- NumCompaniesWorked: 19 observations
+- TotalWorkingYears: 9 observations
+
+• State at Least 6 different techniques to handle missing data:
+
+# Answer:
+
+- Replace the missing values with the median for numerical variables if the column contains outliers.
+- Replace the missing values with the mean for numerical variables.
+- Replace the missing values with the mode for categorical variables.
+- Drop all rows with missing values (listwise deletion).
+- Drop rows with missing values in specific variables based on the analysis to perform (pairwise deletion).
+- Drop the entire variable if it contains more than 70% of missing values.
+
+• Determine the missingness in given dataset & apply appropriate technique with reasoning to handle missing data. (Data must not be removed or deleted)
+
+# Answer:
+
+I consider the missing values in the categorical variables (EnvironmentSatisfaction, JobSatisfaction, and WorkLifeBalance) are Not Missing at Random (MNAR) because some employees may have purposely failed to complete the survey. On the other hand, the missing fields in the numerical variables (NumCompaniesWorked and TotalWorkingYears) are Missing Completely at Random (MCAR) because the missingness is not related to any observed nor unobserved data and there is no any pattern in the missingness.
+
+--> Replacing the missing categorical variable with the mode:
+
+First, creating a copy of the original dataframe:
+```{r}
+df1 <- data.frame(df)
+```
+
+```{r}
+df1['EnvironmentSatisfaction'][is.na(df1['EnvironmentSatisfaction'])] <- df_mode(df1$EnvironmentSatisfaction)
+df1['JobSatisfaction'][is.na(df1['JobSatisfaction'])] <- df_mode(df1$JobSatisfaction)
+df1['WorkLifeBalance'][is.na(df1['WorkLifeBalance'])] <- df_mode(df1$WorkLifeBalance)
+```
+
+--> Replacing the missing numerical variables:
+
+```{r}
+boxplot(df1$NumCompaniesWorked)
+```
+```{r}
+boxplot(df1$TotalWorkingYears)
+```
+
+Since the variables NumCompaniesWorked and TotalWorkingYears have outliers, I will replace the missing values with the median:
+```{r}
+median <- median(df1$NumCompaniesWorked, na.rm = TRUE)
+median1 <- median(df1$TotalWorkingYears, na.rm = TRUE)
+df1['NumCompaniesWorked'][is.na(df1['NumCompaniesWorked'])] <- median
+df1['TotalWorkingYears'][is.na(df1['TotalWorkingYears'])] <- median1
+```
+
+```{r}
+summary(df1)
+```
+• Keep another dataset with all rows with any missing value removed. So, you will have 2 datasets, one with missing values filled & other with missing values removed
+
+# Answer:
+
+- Dataset with missing values (df)
+```{r}
+head(df)
+```
+- Dataset without missing values (df1):
+
+```{r}
+head(df1)
+```
+
+Task 2: Interaction Analysis
+This task is intended to determine interactions between different variables that can affect the target. This is especially required in case of more dimensions. In this task you need to:
+
+• Determine interactions in the dataset:
+
+# Answer:
+
+--> To determine the correct interactions in the dataset, first I have evaluate the independence between the response and the explanatory variables in order to know which explanatory variables could help me to predict the response results:
+
+***Validating the Independence between categorical variables:
+
+```{r}
+sub <- df1[, c("Attrition", "BusinessTravel", "Department", "Education", "EducationField", "Gender", "JobLevel", "JobRole", "MaritalStatus", "StockOptionLevel", "EnvironmentSatisfaction", "JobSatisfaction", "WorkLifeBalance", "JobInvolvement", "PerformanceRating")]
+sub
+```
+
+```{r}
+# I will create a function to apply the chi-square test between all the categorical variables to validate both the independence between the explanatory variables, and the independence between the response variable and the explanatory variables:
+
+combos <- combn(ncol(sub), 2)
+
+df_list <- alply(combos, 2, function(x) {
+  test <- chisq.test(sub[, x[1]], sub[, x[2]])
+  
+  out <- data.frame('row' = colnames(sub)[x[1]]
+                    , 'column' = colnames(sub[x[2]])
+                    , "Chi.Square" = round(test$statistic,3)
+                    ,  "df"= test$parameter
+                    ,  "p.value" = test$p.value
+                    )
+  return(out)
+
+})
+
+result_df <- do.call(rbind, df_list)
+head(result_df)
+```
+
+```{r}
+dep <- filter(result_df, p.value < 0.05 & row == 'Attrition')
+View(dep)
+```
+
+- List of explanatory variables significantly associated with the response 'Attrition' variable (p-values < 0.05): Department, EducationField, JobRole, MaritalStatus, EnvironmentSatisfaction, JobSatisfaction,WorkLifeBalance, JobInvolvement.
+
+***Validating the Independence between numerical variables:
+
+```{r}
+sub2 <- df1[, c("Age", "DistanceFromHome", "MonthlyIncome", "NumCompaniesWorked", "PercentSalaryHike", "TotalWorkingYears", "TrainingTimesLastYear", "YearsAtCompany", "YearsSinceLastPromotion", "YearsWithCurrManager")]
+sub2
+```
+
+```{r}
+df1_cor <- cor(sub2)
+df1_cor <- as.matrix(df1_cor)
+View(df1_cor)
+```
+
+```{r}
+heatmap(df1_cor, Colv = NA, Rowv = NA)
+```
+The result of the Pearson Correlation Coefficient shows us that the next variables have a medium to strong linear correlation:
+
+YearsatCompany and YearsWithCurrentManager: 0.77
+
+***Performing the ANOVA test to evaluate the relation between the response variable and the explanatory numerical variables:
+
+```{r}
+sub3 <- df1[, c('Attrition', "Age", "DistanceFromHome", "MonthlyIncome", "NumCompaniesWorked", "PercentSalaryHike", "TotalWorkingYears", "TrainingTimesLastYear", "YearsAtCompany", "YearsSinceLastPromotion", "YearsWithCurrManager")]
+sub3
+```
+
+
+```{r}
+# I will create a function to apply the ANOVA test between all the the response variable and the explanatory variables:
+
+df_num <- function(x) {
+  aov <- aov(as.numeric(sub3$Attrition) ~ sub3[, x], data = sub3)
+  
+  res <- data.frame('row' = 'Attrition'
+                    , 'column' = colnames(sub3)[x]
+                    ,  "p.value" = summary(aov)[[1]][["Pr(>F)"]][1]
+                    )
+  return(res)
+
+}
+
+num_df <- do.call(rbind, lapply(seq_along(sub3)[-1], df_num))
+View(num_df)
+```
+
+```{r}
+dep_num <- filter(num_df, p.value < 0.05)
+View(dep_num)
+```
+
+The ANOVA test shows that there is strong evidence that our response variable 'Attrition' and the next numerical variables are not independent: Age, MonthlyIncome, NumCompaniesWorked, PercentSalaryHike, TotalWorkingYears, TrainingTimesLastYear, YearsAtCompany, YearsSinceLastPromotion, YearsWithCurrManager.
+
+***Evaluating the importance of each feature in the dataset:
+
+In order to evaluate the importance of each feature in the dataset I will perform the Random Forest, this result will help us to identify the variables that we will use for the interactions and for the final model:
+
+
+```{r}
+# Spliting the data that I will use to train and test the Random Forest:
+split <- sample.split(df1, SplitRatio = 0.8)
+```
+
+```{r}
+train <- subset(df1, split == 'TRUE')
+test <- subset(df1, split == 'FALSE')
+```
+
+```{r}
+set.seed(120)
+classifier_RF <- randomForest(x = train[-2], y = train$Attrition, ntree = 500)
+classifier_RF
+```
+
+
+```{r}
+# Creating the list that will show us the importance of each feature in the dataset
+importance(classifier_RF)
+```
+
+```{r}
+varImpPlot(classifier_RF)
+```
+Based on the Random Forest result, we will use the next interactions in the dataset:
+
+- Age and MonthlyIncome
+- EnvironmentalSatisfaction and JobRole
+- JobSatisfaction and JobRole
+
+• Select any 3 interactions that are prominent and plot interaction using an  appropriate R library
+
+*** Creating the models:
+
+```{r}
+fit <- glm(Attrition ~ Age + TotalWorkingYears + JobRole + MonthlyIncome + YearsAtCompany + PercentSalaryHike + NumCompaniesWorked + EnvironmentSatisfaction + EducationField + JobSatisfaction + Education + JobLevel + WorkLifeBalance + MaritalStatus + YearsSinceLastPromotion, family = binomial, data = df1)
+```
+
+```{r}
+fit_int <- glm(Attrition ~ Age + TotalWorkingYears + JobRole + MonthlyIncome + YearsAtCompany + PercentSalaryHike + NumCompaniesWorked + EnvironmentSatisfaction + EducationField + JobSatisfaction + Education + JobLevel + WorkLifeBalance + MaritalStatus + YearsSinceLastPromotion + Age * MonthlyIncome, family = binomial, data = df1)
+```
+
+```{r}
+# install.packages("interactions")
+
+interact_plot(model = fit_int, pred = Age, modx = MonthlyIncome)
+```
+
+```{r}
+fit_int2 <- glm(Attrition ~ Age + TotalWorkingYears + JobRole + MonthlyIncome + YearsAtCompany + PercentSalaryHike + NumCompaniesWorked + EnvironmentSatisfaction + EducationField + JobSatisfaction + Education + JobLevel + WorkLifeBalance + MaritalStatus + YearsSinceLastPromotion + EnvironmentSatisfaction * JobRole, family = binomial, data = df1)
+```
+
+```{r}
+int_cat <- cat_plot(fit_int2, pred = JobRole, modx = EnvironmentSatisfaction, interval = TRUE)
+int_cat + scale_x_discrete(labels = function(x) str_wrap(x, width = 10), 
+                            name = "Job Role") + 
+           theme(axis.text.x = element_text(angle = -90))
+```
+
+```{r}
+fit_int3 <- glm(Attrition ~ Age + TotalWorkingYears + JobRole + MonthlyIncome + YearsAtCompany + PercentSalaryHike + NumCompaniesWorked + EnvironmentSatisfaction + EducationField + JobSatisfaction + Education + JobLevel + WorkLifeBalance + MaritalStatus + YearsSinceLastPromotion + JobSatisfaction * JobRole, family = binomial, data = df1)
+```
+
+```{r}
+int_cat2 <- cat_plot(fit_int3, pred = JobRole, modx = JobSatisfaction, interval = TRUE)
+int_cat2 + scale_x_discrete(labels = function(x) str_wrap(x, width = 10), 
+                            name = "Job Role") + 
+           theme(axis.text.x = element_text(angle = -90))
+```
+• Interpret the interactions & explain how these can be tackled while model development:
+
+-	Age and MontlyIncome: The interact_plot between the variables Age and MontlyIncome shows that the interaction between the two variables is not significant of strong because they are parallel. In other words, the effect of the Age variable on the outcome does not depend on the level of the MontlyIncome.
+
+- EnvironmentalSatisfaction and JobRole: The cat_plot of these two variables shows that the height of the bar changes across the levels of the categorical variables. It suggests that there is a significant main effect of both variables in the response variable Attrition.
+
+- JobSatisfaction and JobRole: The cat_plot of these two variables shows that the height of the bar changes across the levels of the categorical variables. It suggests that there is a significant main effect of both variables in the response variable Attrition.
+
+The proper way to tackle the interactions while model development is:
+
+- Adding the interaction to the model (separately).
+- Calculating the p-value to determine if the model with the interaction is statistically significant.
+- Using the likelihood ratio to compare the two models.
+- If the likelihood ratio shows us the interactions are significant to the model we keep them.
+- After evaluating each interaction separately with the model we start to perform different combinations, that is, we would do this same previous process with 2 interactions and later with all interactions (3).
+
+Task 3: Normality Analysis
+
+This task is meant to understand the importance of Normality. It is an important consideration often overlooked for simplicity. In this task you need to:
+
+• Define Normality Test & Why is it important to check normality for doing most of the analysis?
+
+## Answer:
+
+Normality tests are tests that evaluate if the data follows a normal distribution, that is if the data is symmetric. It is important to check normality for doing most of the analysis because it allows us to make accurate predictions and conclusions about the population based on the sample distribution (our data) and helps us to produce reliable and accurate results. When the data is not normally distributed, the results of these tests and models may be misleading or inaccurate.
+
+• What are the different tests of checking Normality?
+
+## Answer:
+
+The different test of checking Normality are Shapiro–Wilk test, Kolmogorov–Smirnov test, skewness, kurtosis, histogram, bar plots, box plot, P–P Plot, Q–Q Plot, and mean with SD.
+
+• What measures one shall take if the data is not normal? Explain based on best practices followed in Industry
+
+## Answer:
+
+When a dataset is not normal, the measures that can be taken and the best practice followed in the Industry are:
+
+- Transforming the data: This is one of the most common methods used to work with skewed data, usually the process is applying a square root or a log in order to make the data more closely approximate a bell shape.
+
+- Nonparametric Test: These are types of statistical tests that do not make any assumption about the data distribution, this is the opposite of the parametric test which always assumes the data follows a specific distribution. The most common non-parametric tests are the Mann-Whitney U test, Wilcoxon signed-rank test, Kruskal-Wallis test, Friedman test, and Chi-squared.
+
+- Bootstrapping: This is a resampling technique that consists in sampling the data many times until generates a distribution. This technique does not assume any distribution of the data and can be used when the sample is small.
+
+- Bayesian analysis: This is a type of statistical analysis to update our beliefs about the likelihood of different events. It works by starting with an initial estimate of the probability of an event, called a prior probability. As new evidence or data is collected, this initial estimate is updated, resulting in a new estimate of the probability of the event, called a posterior probability.
+
+• Determine the Normality for appropriate variables. Also, state how to handle variables that do not follow normality and why or why not they need to handled:
+
+## Answer:
+
+*** I will use the Shapiro-Wilk test in order to evaluate if the numerical variables are normally distributed:
+
+```{r}
+# I will create a function to apply the Shapiro-Wilk test between all the numerical variables to validate their distribution:
+
+sw_num <- function(x) {
+  shapiro <- shapiro.test(sub2[, x])
+  
+  dist <- data.frame('column' = colnames(sub2)[x]
+                    ,'p.value' = shapiro$p.value
+                    )
+  return(dist)
+}
+
+result_shap <- do.call(rbind, lapply(seq_along(sub2),sw_num))
+View(result_shap)
+```
+
+```{r}
+num_normal <- filter(result_shap, p.value < 0.05)
+num_normal
+```
+
+The result of the Shapiro-Wilk test shows us that all numerical variables have a normal distribution.
+
+*** I will use the bar plots to plot the categorical variables and evaluate if they are normally distributed:
+
+```{r}
+barplots <- function(x, xname){ 
+  tables <- table(x)
+  barplot(tables, names.arg = levels(x), las = 2, cex.axis = 0.8, cex.names = 0.5, cex.main = 1, main = paste("Distribution of", xname))
+}
+lapply(names(sub), function(x) barplots(sub[[x]], x))
+```
+
+The next categorical variables do not follow a normal distribution:
+
+- EducationField
+- JobLevel
+- JobRole
+- StockOptionLevel
+- EnvironmentSatisfaction
+- JobSatisfaction
+
+--> In this dataset the numerical variables follow a normal distribution, if this would not be the case, I would transform the data using log and square root functions.
+
+--> The categorical variables do not need to be modified to follow a normal distribution, in fact, categorical variables are not normally distributed and are not continue, therefore, the normal assumption does not apply to them. We can just plot the categorical variables to see the distribution and skewness.
