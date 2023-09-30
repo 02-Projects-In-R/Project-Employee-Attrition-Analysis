@@ -1,1 +1,1 @@
-# Project-Employee-Attrition-Analysis
+This project aims to analyze employee attrition using a dataset comprising general information, employee survey data, and manager survey data. The analysis involves handling missing data, exploring interactions between variables, and assessing normality.
